@@ -5,6 +5,7 @@ A simple web dashboard for viewing and managing cloud compute resources across A
 ## Features (MVP)
 
 - VM dashboard for AWS EC2 and GCP Compute Engine, with start and stop actions
+- Dark mode with a light/dark toggle (defaults to your system preference)
 - Encrypted cloud credential storage
 - Single admin user authentication
 - Docker Compose for local development

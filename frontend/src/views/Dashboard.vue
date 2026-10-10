@@ -5,6 +5,9 @@
         <CHeaderBrand href="#">Cross Cloudr</CHeaderBrand>
         <CHeaderNav class="ms-auto">
           <CNavItem>
+            <ThemeToggle />
+          </CNavItem>
+          <CNavItem>
             <span class="nav-link">{{ authStore.username }}</span>
           </CNavItem>
           <CNavItem>
@@ -44,9 +47,11 @@
 <script>
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import ThemeToggle from '../components/ThemeToggle.vue'
 
 export default {
   name: 'Dashboard',
+  components: { ThemeToggle },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()

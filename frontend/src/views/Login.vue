@@ -1,5 +1,8 @@
 <template>
-  <div class="min-vh-100 d-flex flex-row align-items-center bg-light">
+  <div class="min-vh-100 d-flex flex-row align-items-center bg-body-tertiary position-relative">
+    <div class="position-absolute top-0 end-0 m-3">
+      <ThemeToggle />
+    </div>
     <CContainer>
       <CRow class="justify-content-center">
         <CCol md="6">
@@ -50,9 +53,11 @@
 import { reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import ThemeToggle from '../components/ThemeToggle.vue'
 
 export default {
   name: 'Login',
+  components: { ThemeToggle },
   setup() {
     const router = useRouter()
     const authStore = useAuthStore()
