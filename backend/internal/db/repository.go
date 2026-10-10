@@ -99,7 +99,7 @@ func (r *Repository) ListCredentials(ctx context.Context) ([]models.Credentials,
 	}
 	defer rows.Close()
 
-	var result []models.Credentials
+	result := []models.Credentials{}
 	for rows.Next() {
 		var cred models.Credentials
 		if err := rows.Scan(&cred.ID, &cred.Provider, &cred.CreatedAt, &cred.UpdatedAt); err != nil {

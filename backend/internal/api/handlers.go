@@ -9,19 +9,49 @@ import (
 
 	"github.com/chriswood123/cross-cloudr/backend/internal/auth"
 	"github.com/chriswood123/cross-cloudr/backend/internal/aws"
-	"github.com/chriswood123/cross-cloudr/backend/internal/db"
 	"github.com/chriswood123/cross-cloudr/backend/internal/gcp"
 	"github.com/chriswood123/cross-cloudr/backend/internal/models"
 	"github.com/gin-gonic/gin"
 )
 
-type Handler struct {
-	repo *db.Repository
-	auth *auth.Service
+// Repository is the storage interface the handlers depend on.
+// It is satisfied by *db.Repository.
+type Repository interface {
+	SaveCredentials(ctx context.Context, provider models.Provider, data interface{}) error
+	GetCredentials(ctx context.Context, provider models.Provider, out interface{}) error
+	DeleteCredentials(ctx context.Context, provider models.Provider) error
+	ListCredentials(ctx context.Context) ([]models.Credentials, error)
 }
 
-func NewHandler(repo *db.Repository, authService *auth.Service) *Handler {
-	return &Handler{repo: repo, auth: authService}
+type Handler struct {
+	repo Repository
+	auth *auth.Service
+
+	// Injectable cloud-provider operations so tests can stub out real API calls.
+	listAWSVMs   func(ctx context.Context, creds models.AWSCredentials) ([]models.VM, error)
+	listGCPVMs   func(ctx context.Context, creds models.GCPCredentials) ([]models.VM, error)
+	testAWSCreds func(ctx context.Context, creds models.AWSCredentials) error
+	testGCPCreds func(ctx context.Context, creds models.GCPCredentials) error
+}
+
+func NewHandler(repo Repository, authService *auth.Service) *Handler {
+	return &Handler{
+		repo: repo,
+		auth: authService,
+		listAWSVMs: func(ctx context.Context, creds models.AWSCredentials) ([]models.VM, error) {
+			client, err := aws.NewClient(ctx, creds)
+			if err != nil {
+				return nil, err
+			}
+			return client.ListVMs(ctx)
+		},
+		listGCPVMs: func(ctx context.Context, creds models.GCPCredentials) ([]models.VM, error) {
+			client := gcp.NewClient(creds)
+			return client.ListVMs(ctx)
+		},
+		testAWSCreds: aws.TestCredentials,
+		testGCPCreds: gcp.TestCredentials,
+	}
 }
 
 type loginRequest struct {
@@ -248,7 +278,7 @@ func (h *Handler) TestCredentials(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		if err := aws.TestCredentials(ctx, creds); err != nil {
+		if err := h.testAWSCreds(ctx, creds); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -258,8 +288,7 @@ func (h *Handler) TestCredentials(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		client := gcp.NewClient(creds)
-		if _, err := client.ListVMs(ctx); err != nil {
+		if err := h.testGCPCreds(ctx, creds); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -280,14 +309,7 @@ func (h *Handler) ListVMs(c *gin.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client, err := aws.NewClient(ctx, awsCreds)
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("aws: %w", err))
-				mu.Unlock()
-				return
-			}
-			vms, err := client.ListVMs(ctx)
+			vms, err := h.listAWSVMs(ctx, awsCreds)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("aws: %w", err))
@@ -305,8 +327,7 @@ func (h *Handler) ListVMs(c *gin.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client := gcp.NewClient(gcpCreds)
-			vms, err := client.ListVMs(ctx)
+			vms, err := h.listGCPVMs(ctx, gcpCreds)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("gcp: %w", err))
@@ -337,6 +358,10 @@ func (h *Handler) ListVMs(c *gin.Context) {
 			parts[i] = e.Error()
 		}
 		warnings = strings.Join(parts, "; ")
+	}
+
+	if allVMs == nil {
+		allVMs = []models.VM{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"vms": allVMs, "warnings": warnings})

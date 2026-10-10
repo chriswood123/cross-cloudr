@@ -6,12 +6,12 @@ import (
 )
 
 type Config struct {
-	DatabaseURL       string
-	SessionSecret     string
-	EncryptionKey     string
-	AdminUsername     string
-	AdminPasswordHash string
-	Port              string
+	DatabaseURL   string
+	SessionSecret string
+	EncryptionKey string
+	AdminUsername string
+	AdminPassword string
+	Port          string
 }
 
 func Load() (*Config, error) {
@@ -43,11 +43,11 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		DatabaseURL:       dbURL,
-		SessionSecret:     required["SESSION_SECRET"],
-		EncryptionKey:     required["ENCRYPTION_KEY"],
-		AdminUsername:     required["ADMIN_USERNAME"],
-		AdminPasswordHash: adminPassword,
-		Port:              port,
+		DatabaseURL:   dbURL,
+		SessionSecret: required["SESSION_SECRET"],
+		EncryptionKey: required["ENCRYPTION_KEY"],
+		AdminUsername: required["ADMIN_USERNAME"],
+		AdminPassword: adminPassword,
+		Port:          port,
 	}, nil
 }

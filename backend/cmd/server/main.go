@@ -40,7 +40,7 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(cfg.AdminPasswordHash), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(cfg.AdminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		log.Fatalf("failed to hash admin password: %v", err)
 	}

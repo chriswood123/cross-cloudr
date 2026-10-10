@@ -24,6 +24,14 @@ func NewClient(creds models.GCPCredentials) *Client {
 	}
 }
 
+func TestCredentials(ctx context.Context, creds models.GCPCredentials) error {
+	client := NewClient(creds)
+	if _, err := client.ListVMs(ctx); err != nil {
+		return fmt.Errorf("failed to validate GCP credentials: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) ListVMs(ctx context.Context) ([]models.VM, error) {
 	client, err := compute.NewInstancesRESTClient(ctx, option.WithCredentialsJSON(c.credsJSON))
 	if err != nil {

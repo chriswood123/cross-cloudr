@@ -64,6 +64,23 @@ helm install cross-cloudr ./helm/cross-cloudr \
   --set admin.password=changeme
 ```
 
+## Running Tests
+
+Backend (requires Go 1.26+):
+
+```bash
+cd backend
+go test ./...
+```
+
+Frontend (requires Node 20+):
+
+```bash
+cd frontend
+npm install
+npm test
+```
+
 ## Security Notes
 
 - Cloud credentials are encrypted at rest with AES-256-GCM.
