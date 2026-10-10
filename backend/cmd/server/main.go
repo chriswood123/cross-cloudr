@@ -74,8 +74,11 @@ func main() {
 		apiGroup.POST("/login", handler.Login)
 		apiGroup.GET("/me", authService.Middleware(), handler.Me)
 		apiGroup.GET("/credentials", authService.Middleware(), handler.ListCredentials)
+		apiGroup.GET("/credentials/:provider", authService.Middleware(), handler.GetCredentials)
 		apiGroup.POST("/credentials/:provider", authService.Middleware(), handler.SaveCredentials)
+		apiGroup.PUT("/credentials/:provider", authService.Middleware(), handler.SaveCredentials)
 		apiGroup.DELETE("/credentials/:provider", authService.Middleware(), handler.DeleteCredentials)
+		apiGroup.POST("/credentials/:provider/test", authService.Middleware(), handler.TestCredentials)
 		apiGroup.GET("/vms", authService.Middleware(), handler.ListVMs)
 	}
 

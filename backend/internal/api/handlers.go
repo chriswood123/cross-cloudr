@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/chriswood123/cross-cloudr/backend/internal/auth"
@@ -14,8 +16,8 @@ import (
 )
 
 type Handler struct {
-	repo   *db.Repository
-	auth   *auth.Service
+	repo *db.Repository
+	auth *auth.Service
 }
 
 func NewHandler(repo *db.Repository, authService *auth.Service) *Handler {
@@ -63,20 +65,28 @@ func (h *Handler) Me(c *gin.Context) {
 }
 
 type saveAWSCredentialsRequest struct {
-	AccessKeyID     string `json:"access_key_id" binding:"required"`
-	SecretAccessKey string `json:"secret_access_key" binding:"required"`
-	Region          string `json:"region" binding:"required"`
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
+	Region          string `json:"region"`
 }
 
 type saveGCPCredentialsRequest struct {
-	ProjectID          string `json:"project_id" binding:"required"`
-	ServiceAccountJSON string `json:"service_account_json" binding:"required"`
+	ProjectID          string `json:"project_id"`
+	ServiceAccountJSON string `json:"service_account_json"`
 }
 
-func (h *Handler) SaveCredentials(c *gin.Context) {
+func validateProvider(c *gin.Context) (models.Provider, bool) {
 	provider := models.Provider(c.Param("provider"))
 	if provider != models.ProviderAWS && provider != models.ProviderGCP {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid provider"})
+		return "", false
+	}
+	return provider, true
+}
+
+func (h *Handler) SaveCredentials(c *gin.Context) {
+	provider, ok := validateProvider(c)
+	if !ok {
 		return
 	}
 
@@ -87,11 +97,32 @@ func (h *Handler) SaveCredentials(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		creds := models.AWSCredentials{
-			AccessKeyID:     req.AccessKeyID,
-			SecretAccessKey: req.SecretAccessKey,
-			Region:          req.Region,
+
+		existing := models.AWSCredentials{}
+		hasExisting := h.repo.GetCredentials(ctx, provider, &existing) == nil
+
+		creds := models.AWSCredentials{}
+		if req.AccessKeyID != "" {
+			creds.AccessKeyID = req.AccessKeyID
+		} else if hasExisting {
+			creds.AccessKeyID = existing.AccessKeyID
 		}
+		if req.SecretAccessKey != "" {
+			creds.SecretAccessKey = req.SecretAccessKey
+		} else if hasExisting {
+			creds.SecretAccessKey = existing.SecretAccessKey
+		}
+		if req.Region != "" {
+			creds.Region = req.Region
+		} else if hasExisting {
+			creds.Region = existing.Region
+		}
+
+		if creds.AccessKeyID == "" || creds.SecretAccessKey == "" || creds.Region == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "access_key_id, secret_access_key, and region are required"})
+			return
+		}
+
 		if err := h.repo.SaveCredentials(ctx, provider, creds); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -102,10 +133,27 @@ func (h *Handler) SaveCredentials(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		creds := models.GCPCredentials{
-			ProjectID:          req.ProjectID,
-			ServiceAccountJSON: req.ServiceAccountJSON,
+
+		existing := models.GCPCredentials{}
+		hasExisting := h.repo.GetCredentials(ctx, provider, &existing) == nil
+
+		creds := models.GCPCredentials{}
+		if req.ProjectID != "" {
+			creds.ProjectID = req.ProjectID
+		} else if hasExisting {
+			creds.ProjectID = existing.ProjectID
 		}
+		if req.ServiceAccountJSON != "" {
+			creds.ServiceAccountJSON = req.ServiceAccountJSON
+		} else if hasExisting {
+			creds.ServiceAccountJSON = existing.ServiceAccountJSON
+		}
+
+		if creds.ProjectID == "" || creds.ServiceAccountJSON == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "project_id and service_account_json are required"})
+			return
+		}
+
 		if err := h.repo.SaveCredentials(ctx, provider, creds); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -116,9 +164,8 @@ func (h *Handler) SaveCredentials(c *gin.Context) {
 }
 
 func (h *Handler) DeleteCredentials(c *gin.Context) {
-	provider := models.Provider(c.Param("provider"))
-	if provider != models.ProviderAWS && provider != models.ProviderGCP {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid provider"})
+	provider, ok := validateProvider(c)
+	if !ok {
 		return
 	}
 
@@ -139,6 +186,88 @@ func (h *Handler) ListCredentials(c *gin.Context) {
 	c.JSON(http.StatusOK, creds)
 }
 
+type credentialDetail struct {
+	Provider  models.Provider `json:"provider"`
+	Region    string          `json:"region,omitempty"`
+	ProjectID string          `json:"project_id,omitempty"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
+func (h *Handler) GetCredentials(c *gin.Context) {
+	provider, ok := validateProvider(c)
+	if !ok {
+		return
+	}
+
+	ctx := context.Background()
+	var updatedAt string
+	if list, err := h.repo.ListCredentials(ctx); err == nil {
+		for _, cred := range list {
+			if cred.Provider == provider {
+				updatedAt = cred.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")
+				break
+			}
+		}
+	}
+
+	if provider == models.ProviderAWS {
+		var creds models.AWSCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, credentialDetail{
+			Provider:  provider,
+			Region:    creds.Region,
+			UpdatedAt: updatedAt,
+		})
+	} else {
+		var creds models.GCPCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, credentialDetail{
+			Provider:  provider,
+			ProjectID: creds.ProjectID,
+			UpdatedAt: updatedAt,
+		})
+	}
+}
+
+func (h *Handler) TestCredentials(c *gin.Context) {
+	provider, ok := validateProvider(c)
+	if !ok {
+		return
+	}
+
+	ctx := context.Background()
+	if provider == models.ProviderAWS {
+		var creds models.AWSCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err := aws.TestCredentials(ctx, creds); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		var creds models.GCPCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		client := gcp.NewClient(creds)
+		if _, err := client.ListVMs(ctx); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "credentials are valid"})
+}
+
 func (h *Handler) ListVMs(c *gin.Context) {
 	ctx := context.Background()
 	var allVMs []models.VM
@@ -154,14 +283,14 @@ func (h *Handler) ListVMs(c *gin.Context) {
 			client, err := aws.NewClient(ctx, awsCreds)
 			if err != nil {
 				mu.Lock()
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("aws: %w", err))
 				mu.Unlock()
 				return
 			}
 			vms, err := client.ListVMs(ctx)
 			if err != nil {
 				mu.Lock()
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("aws: %w", err))
 				mu.Unlock()
 				return
 			}
@@ -180,7 +309,7 @@ func (h *Handler) ListVMs(c *gin.Context) {
 			vms, err := client.ListVMs(ctx)
 			if err != nil {
 				mu.Lock()
-				errs = append(errs, err)
+				errs = append(errs, fmt.Errorf("gcp: %w", err))
 				mu.Unlock()
 				return
 			}
@@ -193,9 +322,22 @@ func (h *Handler) ListVMs(c *gin.Context) {
 	wg.Wait()
 
 	if len(allVMs) == 0 && len(errs) > 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": errs[0].Error()})
+		errMsg := errs[0].Error()
+		for _, e := range errs[1:] {
+			errMsg += "; " + e.Error()
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": errMsg})
 		return
 	}
 
-	c.JSON(http.StatusOK, allVMs)
+	var warnings string
+	if len(errs) > 0 {
+		parts := make([]string, len(errs))
+		for i, e := range errs {
+			parts[i] = e.Error()
+		}
+		warnings = strings.Join(parts, "; ")
+	}
+
+	c.JSON(http.StatusOK, gin.H{"vms": allVMs, "warnings": warnings})
 }

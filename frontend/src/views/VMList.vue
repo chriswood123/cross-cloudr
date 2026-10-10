@@ -24,6 +24,7 @@
     </CRow>
 
     <CAlert v-if="vmStore.error" color="danger">{{ vmStore.error }}</CAlert>
+    <CAlert v-if="vmStore.warnings" color="warning">{{ vmStore.warnings }}</CAlert>
 
     <CTable hover responsive>
       <CTableHead>

@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/chriswood123/cross-cloudr/backend/internal/models"
 )
 
@@ -17,8 +18,8 @@ type Client struct {
 	region string
 }
 
-func NewClient(ctx context.Context, creds models.AWSCredentials) (*Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx,
+func loadConfig(ctx context.Context, creds models.AWSCredentials) (aws.Config, error) {
+	return config.LoadDefaultConfig(ctx,
 		config.WithRegion(creds.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			creds.AccessKeyID,
@@ -26,11 +27,28 @@ func NewClient(ctx context.Context, creds models.AWSCredentials) (*Client, error
 			"",
 		)),
 	)
+}
+
+func NewClient(ctx context.Context, creds models.AWSCredentials) (*Client, error) {
+	cfg, err := loadConfig(ctx, creds)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
 	return &Client{ec2: ec2.NewFromConfig(cfg), region: creds.Region}, nil
+}
+
+func TestCredentials(ctx context.Context, creds models.AWSCredentials) error {
+	cfg, err := loadConfig(ctx, creds)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	stsClient := sts.NewFromConfig(cfg)
+	if _, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
+		return fmt.Errorf("failed to validate AWS credentials: %w", err)
+	}
+	return nil
 }
 
 func (c *Client) ListVMs(ctx context.Context) ([]models.VM, error) {
@@ -47,8 +65,8 @@ func (c *Client) ListVMs(ctx context.Context) ([]models.VM, error) {
 		for _, reservation := range page.Reservations {
 			for _, inst := range reservation.Instances {
 				vm := mapEC2Instance(inst)
-			vm.Region = c.region
-			vms = append(vms, vm)
+				vm.Region = c.region
+				vms = append(vms, vm)
 			}
 		}
 	}
@@ -74,7 +92,7 @@ func mapEC2Instance(inst types.Instance) models.VM {
 		Name:         name,
 		State:        string(inst.State.Name),
 		InstanceType: string(inst.InstanceType),
-		Region:       "", // populated by caller if needed
+		Region:       "",
 		Tags:         tags,
 	}
 
