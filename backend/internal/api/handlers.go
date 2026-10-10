@@ -32,6 +32,10 @@ type Handler struct {
 	listGCPVMs   func(ctx context.Context, creds models.GCPCredentials) ([]models.VM, error)
 	testAWSCreds func(ctx context.Context, creds models.AWSCredentials) error
 	testGCPCreds func(ctx context.Context, creds models.GCPCredentials) error
+	startAWSVM   func(ctx context.Context, creds models.AWSCredentials, instanceID string) error
+	stopAWSVM    func(ctx context.Context, creds models.AWSCredentials, instanceID string) error
+	startGCPVM   func(ctx context.Context, creds models.GCPCredentials, zone, name string) error
+	stopGCPVM    func(ctx context.Context, creds models.GCPCredentials, zone, name string) error
 }
 
 func NewHandler(repo Repository, authService *auth.Service) *Handler {
@@ -51,6 +55,26 @@ func NewHandler(repo Repository, authService *auth.Service) *Handler {
 		},
 		testAWSCreds: aws.TestCredentials,
 		testGCPCreds: gcp.TestCredentials,
+		startAWSVM: func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+			client, err := aws.NewClient(ctx, creds)
+			if err != nil {
+				return err
+			}
+			return client.StartVM(ctx, instanceID)
+		},
+		stopAWSVM: func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+			client, err := aws.NewClient(ctx, creds)
+			if err != nil {
+				return err
+			}
+			return client.StopVM(ctx, instanceID)
+		},
+		startGCPVM: func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+			return gcp.NewClient(creds).StartVM(ctx, zone, name)
+		},
+		stopGCPVM: func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+			return gcp.NewClient(creds).StopVM(ctx, zone, name)
+		},
 	}
 }
 
@@ -365,4 +389,83 @@ func (h *Handler) ListVMs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"vms": allVMs, "warnings": warnings})
+}
+
+// vmActionRequest identifies a VM to start or stop. AWS addresses instances by
+// instance ID; GCP addresses them by name within a zone.
+type vmActionRequest struct {
+	InstanceID string `json:"instance_id"`
+	Name       string `json:"name"`
+	Zone       string `json:"zone"`
+}
+
+func (h *Handler) StartVM(c *gin.Context) {
+	h.vmAction(c, "start")
+}
+
+func (h *Handler) StopVM(c *gin.Context) {
+	h.vmAction(c, "stop")
+}
+
+func (h *Handler) vmAction(c *gin.Context, action string) {
+	provider, ok := validateProvider(c)
+	if !ok {
+		return
+	}
+
+	var req vmActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := context.Background()
+	if provider == models.ProviderAWS {
+		if req.InstanceID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "instance_id is required"})
+			return
+		}
+
+		var creds models.AWSCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		var err error
+		if action == "start" {
+			err = h.startAWSVM(ctx, creds, req.InstanceID)
+		} else {
+			err = h.stopAWSVM(ctx, creds, req.InstanceID)
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		if req.Name == "" || req.Zone == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name and zone are required"})
+			return
+		}
+
+		var creds models.GCPCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		zone := strings.TrimPrefix(req.Zone, "zones/")
+		var err error
+		if action == "start" {
+			err = h.startGCPVM(ctx, creds, zone, req.Name)
+		} else {
+			err = h.stopGCPVM(ctx, creds, zone, req.Name)
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("VM %s request accepted", action)})
 }

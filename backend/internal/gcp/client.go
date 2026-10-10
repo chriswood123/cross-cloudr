@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
@@ -63,6 +64,42 @@ func (c *Client) ListVMs(ctx context.Context) ([]models.VM, error) {
 	return vms, nil
 }
 
+func (c *Client) StartVM(ctx context.Context, zone, name string) error {
+	client, err := compute.NewInstancesRESTClient(ctx, option.WithCredentialsJSON(c.credsJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create GCP instances client: %w", err)
+	}
+	defer client.Close()
+
+	req := &computepb.StartInstanceRequest{
+		Project:  c.projectID,
+		Zone:     zone,
+		Instance: name,
+	}
+	if _, err := client.Start(ctx, req); err != nil {
+		return fmt.Errorf("failed to start GCP instance %s: %w", name, err)
+	}
+	return nil
+}
+
+func (c *Client) StopVM(ctx context.Context, zone, name string) error {
+	client, err := compute.NewInstancesRESTClient(ctx, option.WithCredentialsJSON(c.credsJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create GCP instances client: %w", err)
+	}
+	defer client.Close()
+
+	req := &computepb.StopInstanceRequest{
+		Project:  c.projectID,
+		Zone:     zone,
+		Instance: name,
+	}
+	if _, err := client.Stop(ctx, req); err != nil {
+		return fmt.Errorf("failed to stop GCP instance %s: %w", name, err)
+	}
+	return nil
+}
+
 func mapGCPInstance(inst *computepb.Instance, zone string) models.VM {
 	name := inst.GetName()
 	vm := models.VM{
@@ -71,7 +108,7 @@ func mapGCPInstance(inst *computepb.Instance, zone string) models.VM {
 		Name:         name,
 		State:        inst.GetStatus(),
 		InstanceType: getMachineType(inst.GetMachineType()),
-		Zone:         zone,
+		Zone:         strings.TrimPrefix(zone, "zones/"),
 		Tags:         inst.GetLabels(),
 	}
 

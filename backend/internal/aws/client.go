@@ -74,6 +74,26 @@ func (c *Client) ListVMs(ctx context.Context) ([]models.VM, error) {
 	return vms, nil
 }
 
+func (c *Client) StartVM(ctx context.Context, instanceID string) error {
+	input := &ec2.StartInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+	if _, err := c.ec2.StartInstances(ctx, input); err != nil {
+		return fmt.Errorf("failed to start AWS instance %s: %w", instanceID, err)
+	}
+	return nil
+}
+
+func (c *Client) StopVM(ctx context.Context, instanceID string) error {
+	input := &ec2.StopInstancesInput{
+		InstanceIds: []string{instanceID},
+	}
+	if _, err := c.ec2.StopInstances(ctx, input); err != nil {
+		return fmt.Errorf("failed to stop AWS instance %s: %w", instanceID, err)
+	}
+	return nil
+}
+
 func mapEC2Instance(inst types.Instance) models.VM {
 	name := ""
 	tags := make(map[string]string)

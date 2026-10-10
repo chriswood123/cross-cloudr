@@ -7,6 +7,8 @@ export const useVMStore = defineStore('vms', () => {
   const warnings = ref('')
   const loading = ref(false)
   const error = ref(null)
+  const actionError = ref(null)
+  const pendingActions = ref({})
 
   async function fetchVMs() {
     loading.value = true
@@ -30,5 +32,52 @@ export const useVMStore = defineStore('vms', () => {
     }
   }
 
-  return { vms, warnings, loading, error, fetchVMs }
+  function vmKey(vm) {
+    return `${vm.provider}-${vm.id}`
+  }
+
+  function isActionPending(vm) {
+    return !!pendingActions.value[vmKey(vm)]
+  }
+
+  async function vmAction(vm, action) {
+    const key = vmKey(vm)
+    actionError.value = null
+    pendingActions.value = { ...pendingActions.value, [key]: true }
+    try {
+      // AWS addresses instances by instance ID; GCP addresses them by name
+      // within a zone.
+      const body =
+        vm.provider === 'aws' ? { instance_id: vm.id } : { name: vm.name, zone: vm.zone }
+      await api.post(`/api/vms/${vm.provider}/${action}`, body)
+      await fetchVMs()
+      return true
+    } catch (err) {
+      actionError.value = err.response?.data?.error || `Failed to ${action} VM`
+      return false
+    } finally {
+      pendingActions.value = { ...pendingActions.value, [key]: false }
+    }
+  }
+
+  function startVM(vm) {
+    return vmAction(vm, 'start')
+  }
+
+  function stopVM(vm) {
+    return vmAction(vm, 'stop')
+  }
+
+  return {
+    vms,
+    warnings,
+    loading,
+    error,
+    actionError,
+    pendingActions,
+    fetchVMs,
+    startVM,
+    stopVM,
+    isActionPending,
+  }
 })

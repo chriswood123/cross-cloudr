@@ -100,6 +100,8 @@ func newTestRouter(h *Handler, withAuthMiddleware bool) *gin.Engine {
 	apiGroup.DELETE("/credentials/:provider", h.DeleteCredentials)
 	apiGroup.POST("/credentials/:provider/test", h.TestCredentials)
 	apiGroup.GET("/vms", h.ListVMs)
+	apiGroup.POST("/vms/:provider/start", h.StartVM)
+	apiGroup.POST("/vms/:provider/stop", h.StopVM)
 	return r
 }
 
@@ -208,6 +210,8 @@ func TestProtectedEndpoints_RequireAuth(t *testing.T) {
 		{http.MethodDelete, "/api/credentials/aws"},
 		{http.MethodPost, "/api/credentials/aws/test"},
 		{http.MethodGet, "/api/vms"},
+		{http.MethodPost, "/api/vms/aws/start"},
+		{http.MethodPost, "/api/vms/aws/stop"},
 	}
 
 	for _, ep := range endpoints {
@@ -736,6 +740,167 @@ func TestListVMs_OnlyAWSConfigured(t *testing.T) {
 	}
 	if len(resp.VMs) != 1 {
 		t.Errorf("expected 1 VM, got %d", len(resp.VMs))
+	}
+}
+
+// --- VM start/stop ---
+
+func TestStartStopVM_AWS_Success(t *testing.T) {
+	repo := newMockRepo()
+	h := newTestHandler(repo)
+	var started, stopped []string
+	h.startAWSVM = func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+		started = append(started, instanceID)
+		return nil
+	}
+	h.stopAWSVM = func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+		stopped = append(stopped, instanceID)
+		return nil
+	}
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	seedAWS(t, repo)
+
+	w := doRequest(r, "POST", "/api/vms/aws/start", `{"instance_id":"i-123"}`, authHeaders(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = doRequest(r, "POST", "/api/vms/aws/stop", `{"instance_id":"i-123"}`, authHeaders(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if len(started) != 1 || started[0] != "i-123" {
+		t.Errorf("expected start to be called for i-123, got %v", started)
+	}
+	if len(stopped) != 1 || stopped[0] != "i-123" {
+		t.Errorf("expected stop to be called for i-123, got %v", stopped)
+	}
+}
+
+func TestStartStopVM_GCP_Success(t *testing.T) {
+	repo := newMockRepo()
+	h := newTestHandler(repo)
+	var started, stopped [][2]string
+	h.startGCPVM = func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+		started = append(started, [2]string{zone, name})
+		return nil
+	}
+	h.stopGCPVM = func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+		stopped = append(stopped, [2]string{zone, name})
+		return nil
+	}
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	seedGCP(t, repo)
+
+	w := doRequest(r, "POST", "/api/vms/gcp/start", `{"name":"gce-1","zone":"us-central1-a"}`, authHeaders(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// A zone with the "zones/" prefix (as returned by some GCP API responses)
+	// must be normalized to the bare zone name.
+	w = doRequest(r, "POST", "/api/vms/gcp/stop", `{"name":"gce-1","zone":"zones/us-central1-a"}`, authHeaders(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if len(started) != 1 || started[0] != [2]string{"us-central1-a", "gce-1"} {
+		t.Errorf("expected start to be called for gce-1 in us-central1-a, got %v", started)
+	}
+	if len(stopped) != 1 || stopped[0] != [2]string{"us-central1-a", "gce-1"} {
+		t.Errorf("expected stop to be called for gce-1 in us-central1-a, got %v", stopped)
+	}
+}
+
+func TestStartStopVM_FailureReturnsError(t *testing.T) {
+	repo := newMockRepo()
+	h := newTestHandler(repo)
+	h.stopAWSVM = func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+		return fmt.Errorf("IncorrectInstanceState: The instance is not in a state that can be stopped")
+	}
+	h.startGCPVM = func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+		return fmt.Errorf("insufficient permissions")
+	}
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	seedAWS(t, repo)
+	seedGCP(t, repo)
+
+	w := doRequest(r, "POST", "/api/vms/aws/stop", `{"instance_id":"i-123"}`, authHeaders(token))
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "IncorrectInstanceState") {
+		t.Errorf("expected error detail in response, got %s", w.Body.String())
+	}
+
+	w = doRequest(r, "POST", "/api/vms/gcp/start", `{"name":"gce-1","zone":"us-central1-a"}`, authHeaders(token))
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "insufficient permissions") {
+		t.Errorf("expected error detail in response, got %s", w.Body.String())
+	}
+}
+
+func TestStartStopVM_MissingFields(t *testing.T) {
+	repo := newMockRepo()
+	h := newTestHandler(repo)
+	h.startAWSVM = func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
+		t.Error("start must not be called with a missing instance ID")
+		return nil
+	}
+	h.startGCPVM = func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
+		t.Error("start must not be called with missing name or zone")
+		return nil
+	}
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	seedAWS(t, repo)
+	seedGCP(t, repo)
+
+	w := doRequest(r, "POST", "/api/vms/aws/start", `{}`, authHeaders(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing AWS instance_id, got %d", w.Code)
+	}
+
+	w = doRequest(r, "POST", "/api/vms/gcp/start", `{"name":"gce-1"}`, authHeaders(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing GCP zone, got %d", w.Code)
+	}
+}
+
+func TestStartStopVM_MissingCredentials(t *testing.T) {
+	h := newTestHandler(newMockRepo())
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	w := doRequest(r, "POST", "/api/vms/aws/start", `{"instance_id":"i-123"}`, authHeaders(token))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+
+	w = doRequest(r, "POST", "/api/vms/gcp/stop", `{"name":"gce-1","zone":"us-central1-a"}`, authHeaders(token))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestStartStopVM_InvalidProvider(t *testing.T) {
+	h := newTestHandler(newMockRepo())
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+
+	w := doRequest(r, "POST", "/api/vms/azure/start", `{"instance_id":"vm-1"}`, authHeaders(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown provider, got %d", w.Code)
 	}
 }
 

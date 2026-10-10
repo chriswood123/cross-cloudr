@@ -1,10 +1,10 @@
 # Cross Cloudr
 
-A simple web dashboard for viewing cloud compute resources across AWS and Google Cloud.
+A simple web dashboard for viewing and managing cloud compute resources across AWS and Google Cloud.
 
 ## Features (MVP)
 
-- View-only VM dashboard for AWS EC2 and GCP Compute Engine
+- VM dashboard for AWS EC2 and GCP Compute Engine, with start and stop actions
 - Encrypted cloud credential storage
 - Single admin user authentication
 - Docker Compose for local development
@@ -43,7 +43,12 @@ A simple web dashboard for viewing cloud compute resources across AWS and Google
 1. Log in to the dashboard.
 2. Navigate to **Credentials**.
 3. Add your AWS IAM user access keys and region, or upload a GCP service account JSON.
-4. Go to **VMs** to view your instances.
+4. Go to **VMs** to view your instances and start or stop them.
+
+To use the start/stop actions, the cloud credentials need the
+`ec2:StartInstances` and `ec2:StopInstances` permissions (AWS) or
+`compute.instances.start` and `compute.instances.stop` permissions (GCP)
+in addition to read access.
 
 ## Kubernetes Deployment
 

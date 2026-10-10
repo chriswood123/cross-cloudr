@@ -24,6 +24,7 @@
     </CRow>
 
     <CAlert v-if="vmStore.error" color="danger">{{ vmStore.error }}</CAlert>
+    <CAlert v-if="vmStore.actionError" color="danger">{{ vmStore.actionError }}</CAlert>
     <CAlert v-if="vmStore.warnings" color="warning">{{ vmStore.warnings }}</CAlert>
 
     <CTable hover responsive>
@@ -37,6 +38,7 @@
           <CTableHeaderCell>Region/Zone</CTableHeaderCell>
           <CTableHeaderCell>Public IP</CTableHeaderCell>
           <CTableHeaderCell>Private IP</CTableHeaderCell>
+          <CTableHeaderCell>Actions</CTableHeaderCell>
         </CTableRow>
       </CTableHead>
       <CTableBody>
@@ -55,9 +57,30 @@
           <CTableDataCell>{{ vm.zone || vm.region || '-' }}</CTableDataCell>
           <CTableDataCell>{{ vm.public_ip || '-' }}</CTableDataCell>
           <CTableDataCell>{{ vm.private_ip || '-' }}</CTableDataCell>
+          <CTableDataCell>
+            <CButton
+              v-if="canStart(vm)"
+              size="sm"
+              color="success"
+              class="me-1"
+              :disabled="vmStore.isActionPending(vm)"
+              @click="startVM(vm)"
+            >
+              {{ vmStore.isActionPending(vm) ? 'Starting...' : 'Start' }}
+            </CButton>
+            <CButton
+              v-if="canStop(vm)"
+              size="sm"
+              color="danger"
+              :disabled="vmStore.isActionPending(vm)"
+              @click="stopVM(vm)"
+            >
+              {{ vmStore.isActionPending(vm) ? 'Stopping...' : 'Stop' }}
+            </CButton>
+          </CTableDataCell>
         </CTableRow>
         <CTableRow v-if="filteredVMs.length === 0">
-          <CTableDataCell colspan="8" class="text-center">
+          <CTableDataCell colspan="9" class="text-center">
             {{ vmStore.loading ? 'Loading...' : 'No VMs found' }}
           </CTableDataCell>
         </CTableRow>
@@ -103,6 +126,28 @@ export default {
       return 'secondary'
     }
 
+    // AWS "stopped" instances can be started. GCP reports a stopped instance
+    // as "TERMINATED" (and unlike AWS, it can be started again).
+    function canStart(vm) {
+      const s = (vm.state || '').toLowerCase()
+      if (vm.provider === 'aws') return s === 'stopped'
+      return s === 'terminated'
+    }
+
+    function canStop(vm) {
+      return (vm.state || '').toLowerCase() === 'running'
+    }
+
+    function startVM(vm) {
+      vmStore.startVM(vm)
+    }
+
+    function stopVM(vm) {
+      if (window.confirm(`Stop ${vm.name || vm.id}?`)) {
+        vmStore.stopVM(vm)
+      }
+    }
+
     function refresh() {
       vmStore.fetchVMs()
     }
@@ -118,6 +163,10 @@ export default {
       providerOptions,
       filteredVMs,
       stateColor,
+      canStart,
+      canStop,
+      startVM,
+      stopVM,
       refresh,
     }
   },

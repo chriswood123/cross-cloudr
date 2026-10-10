@@ -80,6 +80,8 @@ func main() {
 		apiGroup.DELETE("/credentials/:provider", authService.Middleware(), handler.DeleteCredentials)
 		apiGroup.POST("/credentials/:provider/test", authService.Middleware(), handler.TestCredentials)
 		apiGroup.GET("/vms", authService.Middleware(), handler.ListVMs)
+		apiGroup.POST("/vms/:provider/start", authService.Middleware(), handler.StartVM)
+		apiGroup.POST("/vms/:provider/stop", authService.Middleware(), handler.StopVM)
 	}
 
 	srv := &http.Server{
