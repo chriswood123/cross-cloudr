@@ -1,0 +1,23 @@
+{
+  "name": "cross-cloudr-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@coreui/coreui": "^5.1.1",
+    "@coreui/vue": "^5.2.0",
+    "axios": "^1.7.3",
+    "pinia": "^2.2.0",
+    "vue": "^3.4.34",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.1",
+    "vite": "^5.3.5"
+  }
+}

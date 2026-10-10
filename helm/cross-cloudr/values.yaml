@@ -1,0 +1,58 @@
+replicaCount: 1
+
+image:
+  backend:
+    repository: cross-cloudr-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: cross-cloudr-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+service:
+  backend:
+    type: ClusterIP
+    port: 8080
+  frontend:
+    type: ClusterIP
+    port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: cross-cloudr.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+admin:
+  username: admin
+  # Change these in production!
+  password: admin
+  # Base64-encoded 32-byte AES key
+  encryptionKey: ""
+  # JWT secret
+  sessionSecret: ""
+
+postgresql:
+  enabled: true
+  auth:
+    username: crosscloudr
+    password: crosscloudr
+    database: crosscloudr
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
