@@ -59,6 +59,15 @@
           <CTableDataCell>{{ vm.private_ip || '-' }}</CTableDataCell>
           <CTableDataCell>
             <CButton
+              size="sm"
+              color="info"
+              variant="outline"
+              class="me-1"
+              @click="showDetails(vm)"
+            >
+              Details
+            </CButton>
+            <CButton
               v-if="canStart(vm)"
               size="sm"
               color="success"
@@ -86,6 +95,51 @@
         </CTableRow>
       </CTableBody>
     </CTable>
+
+    <CModal :visible="!!selectedVM" @close="selectedVM = null">
+      <CModalHeader>
+        <CModalTitle>{{ selectedVM?.name || selectedVM?.id }}</CModalTitle>
+      </CModalHeader>
+      <CModalBody v-if="selectedVM">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Provider</dt>
+          <dd class="col-sm-8">
+            <CBadge :color="providerColor(selectedVM.provider)">
+              {{ selectedVM.provider.toUpperCase() }}
+            </CBadge>
+          </dd>
+          <dt class="col-sm-4">Name</dt>
+          <dd class="col-sm-8">{{ selectedVM.name || '-' }}</dd>
+          <dt class="col-sm-4">ID</dt>
+          <dd class="col-sm-8">{{ selectedVM.id }}</dd>
+          <dt class="col-sm-4">State</dt>
+          <dd class="col-sm-8">
+            <CBadge :color="stateColor(selectedVM.state)">{{ selectedVM.state }}</CBadge>
+          </dd>
+          <dt class="col-sm-4">Type</dt>
+          <dd class="col-sm-8">{{ selectedVM.instance_type || '-' }}</dd>
+          <dt class="col-sm-4">Region</dt>
+          <dd class="col-sm-8">{{ selectedVM.region || '-' }}</dd>
+          <dt class="col-sm-4">Zone</dt>
+          <dd class="col-sm-8">{{ selectedVM.zone || '-' }}</dd>
+          <dt class="col-sm-4">Public IP</dt>
+          <dd class="col-sm-8">{{ selectedVM.public_ip || '-' }}</dd>
+          <dt class="col-sm-4">Private IP</dt>
+          <dd class="col-sm-8">{{ selectedVM.private_ip || '-' }}</dd>
+          <dt class="col-sm-4">Launch Time</dt>
+          <dd class="col-sm-8">{{ formatDate(selectedVM.launch_time) }}</dd>
+          <dt class="col-sm-4">Tags</dt>
+          <dd class="col-sm-8">
+            <template v-if="tagList(selectedVM).length > 0">
+              <CBadge v-for="tag in tagList(selectedVM)" :key="tag" color="secondary" class="me-1 mb-1">
+                {{ tag }}
+              </CBadge>
+            </template>
+            <span v-else>-</span>
+          </dd>
+        </dl>
+      </CModalBody>
+    </CModal>
   </div>
 </template>
 
@@ -99,6 +153,7 @@ export default {
     const vmStore = useVMStore()
     const filter = ref('')
     const providerFilter = ref('')
+    const selectedVM = ref(null)
 
     const providerOptions = [
       { label: 'All Providers', value: '' },
@@ -157,6 +212,24 @@ export default {
       }
     }
 
+    function showDetails(vm) {
+      selectedVM.value = vm
+    }
+
+    function formatDate(value) {
+      if (!value) return '-'
+      return new Date(value).toLocaleString()
+    }
+
+    // Valueless tags (e.g. DigitalOcean labels) render as plain badges;
+    // key/value tags render as "key: value".
+    function tagList(vm) {
+      const tags = vm.tags || {}
+      return Object.keys(tags)
+        .sort()
+        .map((key) => (tags[key] ? `${key}: ${tags[key]}` : key))
+    }
+
     function refresh() {
       vmStore.fetchVMs()
     }
@@ -169,6 +242,7 @@ export default {
       vmStore,
       filter,
       providerFilter,
+      selectedVM,
       providerOptions,
       filteredVMs,
       stateColor,
@@ -177,6 +251,9 @@ export default {
       canStop,
       startVM,
       stopVM,
+      showDetails,
+      formatDate,
+      tagList,
       refresh,
     }
   },

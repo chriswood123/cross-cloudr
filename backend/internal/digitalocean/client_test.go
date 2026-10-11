@@ -48,7 +48,7 @@ func TestListVMs(t *testing.T) {
 	if vm.PublicIP != "203.0.113.5" || vm.PrivateIP != "10.0.0.2" {
 		t.Errorf("unexpected network addresses: %+v", vm)
 	}
-	if !reflect.DeepEqual(vm.Tags, map[string]string{"web": "true", "prod": "true"}) {
+	if !reflect.DeepEqual(vm.Tags, map[string]string{"web": "", "prod": ""}) {
 		t.Errorf("unexpected tags: %v", vm.Tags)
 	}
 	if vm.LaunchTime == nil || !vm.LaunchTime.Equal(time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)) {

@@ -159,9 +159,10 @@ func mapDroplet(d digitalDroplet) models.VM {
 	} else if state == "off" {
 		state = "stopped"
 	}
+	// DigitalOcean tags are labels without values; an empty string marks that.
 	tags := make(map[string]string, len(d.Tags))
 	for _, tag := range d.Tags {
-		tags[tag] = "true"
+		tags[tag] = ""
 	}
 	vm := models.VM{
 		ID:           strconv.Itoa(d.ID),

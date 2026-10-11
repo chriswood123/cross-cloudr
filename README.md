@@ -4,7 +4,7 @@ A simple web dashboard for viewing and managing cloud compute resources across A
 
 ## Features (MVP)
 
-- VM dashboard for AWS EC2, GCP Compute Engine, and DigitalOcean Droplets, with start and stop actions
+- VM dashboard for AWS EC2, GCP Compute Engine, and DigitalOcean Droplets, with start and stop actions and a details view (IPs, launch time, tags)
 - Dark mode with a light/dark toggle (defaults to your system preference)
 - Encrypted cloud credential storage
 - Single admin user authentication
