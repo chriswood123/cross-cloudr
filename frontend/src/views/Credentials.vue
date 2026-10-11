@@ -20,7 +20,7 @@
           <CTableBody>
             <CTableRow v-for="cred in savedCredentials" :key="cred.provider">
               <CTableDataCell>
-                <CBadge :color="cred.provider === 'aws' ? 'warning' : 'info'">
+                <CBadge :color="providerColor(cred.provider)">
                   {{ cred.provider.toUpperCase() }}
                 </CBadge>
               </CTableDataCell>
@@ -28,9 +28,10 @@
                 <div v-if="cred.provider === 'aws'">
                   Region: {{ cred.region || '-' }}
                 </div>
-                <div v-else>
+                <div v-else-if="cred.provider === 'gcp'">
                   Project: {{ cred.project_id || '-' }}
                 </div>
+                <div v-else>API token configured</div>
               </CTableDataCell>
               <CTableDataCell>{{ formatDate(cred.updated_at) }}</CTableDataCell>
               <CTableDataCell class="text-end">
@@ -67,6 +68,27 @@
               </div>
               <CButton color="primary" type="submit" :disabled="saving">{{ editingProvider === 'aws' ? 'Update' : 'Save' }} AWS Credentials</CButton>
               <CButton v-if="editingProvider === 'aws'" color="secondary" variant="outline" class="ms-2" @click="cancelEdit">Cancel</CButton>
+            </CForm>
+          </CCardBody>
+        </CCard>
+      </CCol>
+
+      <CCol md="6">
+        <CCard class="mb-4">
+          <CCardHeader>{{ editingProvider === 'digitalocean' ? 'Edit' : 'Add' }} DigitalOcean Credentials</CCardHeader>
+          <CCardBody>
+            <CForm @submit.prevent="saveDigitalOcean">
+              <div class="mb-3">
+                <CFormLabel>API Token</CFormLabel>
+                <CFormInput
+                  v-model="digitalocean.access_token"
+                  type="password"
+                  :placeholder="digitalOceanPlaceholder"
+                  :required="editingProvider !== 'digitalocean'"
+                />
+              </div>
+              <CButton color="primary" type="submit" :disabled="saving">{{ editingProvider === 'digitalocean' ? 'Update' : 'Save' }} DigitalOcean Credentials</CButton>
+              <CButton v-if="editingProvider === 'digitalocean'" color="secondary" variant="outline" class="ms-2" @click="cancelEdit">Cancel</CButton>
             </CForm>
           </CCardBody>
         </CCard>
@@ -118,6 +140,8 @@ export default {
       service_account_json: '',
     })
 
+    const digitalocean = reactive({ access_token: '' })
+
     const savedCredentials = ref([])
     const editingProvider = ref(null)
     const saving = ref(false)
@@ -127,6 +151,13 @@ export default {
 
     const awsPlaceholder = ref('')
     const gcpPlaceholder = ref('')
+    const digitalOceanPlaceholder = ref('')
+
+    function providerColor(provider) {
+      if (provider === 'aws') return 'warning'
+      if (provider === 'digitalocean') return 'primary'
+      return 'info'
+    }
 
     async function fetchCredentials() {
       try {
@@ -162,10 +193,13 @@ export default {
         aws.secret_access_key = ''
         aws.region = detail.region || ''
         awsPlaceholder.value = 'Leave blank to keep unchanged'
-      } else {
+      } else if (cred.provider === 'gcp') {
         gcp.project_id = detail.project_id || ''
         gcp.service_account_json = ''
         gcpPlaceholder.value = 'Paste new service account JSON to update, or leave blank to keep unchanged'
+      } else {
+        digitalocean.access_token = ''
+        digitalOceanPlaceholder.value = 'Leave blank to keep unchanged'
       }
     }
 
@@ -180,8 +214,10 @@ export default {
       aws.region = ''
       gcp.project_id = ''
       gcp.service_account_json = ''
+      digitalocean.access_token = ''
       awsPlaceholder.value = ''
       gcpPlaceholder.value = 'Paste service account JSON here'
+      digitalOceanPlaceholder.value = ''
     }
 
     async function saveAWS() {
@@ -224,6 +260,27 @@ export default {
         await fetchCredentials()
       } catch (err) {
         error.value = err.response?.data?.error || 'Failed to save GCP credentials'
+      } finally {
+        saving.value = false
+      }
+    }
+
+    async function saveDigitalOcean() {
+      saving.value = true
+      error.value = null
+      success.value = null
+      try {
+        const payload = { ...digitalocean }
+        if (editingProvider.value === 'digitalocean' && !payload.access_token) {
+          delete payload.access_token
+        }
+        await api.post('/api/credentials/digitalocean', payload)
+        success.value = 'DigitalOcean credentials saved successfully'
+        editingProvider.value = null
+        resetForms()
+        await fetchCredentials()
+      } catch (err) {
+        error.value = err.response?.data?.error || 'Failed to save DigitalOcean credentials'
       } finally {
         saving.value = false
       }
@@ -274,6 +331,7 @@ export default {
     return {
       aws,
       gcp,
+      digitalocean,
       savedCredentials,
       editingProvider,
       saving,
@@ -282,8 +340,11 @@ export default {
       success,
       awsPlaceholder,
       gcpPlaceholder,
+      digitalOceanPlaceholder,
+      providerColor,
       saveAWS,
       saveGCP,
+      saveDigitalOcean,
       edit,
       cancelEdit,
       test,

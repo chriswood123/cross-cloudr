@@ -44,7 +44,7 @@
       <CTableBody>
         <CTableRow v-for="vm in filteredVMs" :key="`${vm.provider}-${vm.id}`">
           <CTableDataCell>
-            <CBadge :color="vm.provider === 'aws' ? 'warning' : 'info'">
+            <CBadge :color="providerColor(vm.provider)">
               {{ vm.provider.toUpperCase() }}
             </CBadge>
           </CTableDataCell>
@@ -104,6 +104,7 @@ export default {
       { label: 'All Providers', value: '' },
       { label: 'AWS', value: 'aws' },
       { label: 'GCP', value: 'gcp' },
+      { label: 'DigitalOcean', value: 'digitalocean' },
     ]
 
     const filteredVMs = computed(() => {
@@ -126,12 +127,20 @@ export default {
       return 'secondary'
     }
 
+    function providerColor(provider) {
+      if (provider === 'aws') return 'warning'
+      if (provider === 'digitalocean') return 'primary'
+      return 'info'
+    }
+
     // AWS "stopped" instances can be started. GCP reports a stopped instance
-    // as "TERMINATED" (and unlike AWS, it can be started again).
+    // as "TERMINATED" (and unlike AWS, it can be started again). DigitalOcean
+    // droplet states are normalized to "stopped" by the backend.
     function canStart(vm) {
       const s = (vm.state || '').toLowerCase()
       if (vm.provider === 'aws') return s === 'stopped'
-      return s === 'terminated'
+      if (vm.provider === 'gcp') return s === 'terminated'
+      return s === 'stopped'
     }
 
     function canStop(vm) {
@@ -163,6 +172,7 @@ export default {
       providerOptions,
       filteredVMs,
       stateColor,
+      providerColor,
       canStart,
       canStop,
       startVM,

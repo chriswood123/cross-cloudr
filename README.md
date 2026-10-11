@@ -1,10 +1,10 @@
 # Cross Cloudr
 
-A simple web dashboard for viewing and managing cloud compute resources across AWS and Google Cloud.
+A simple web dashboard for viewing and managing cloud compute resources across AWS, Google Cloud, and DigitalOcean.
 
 ## Features (MVP)
 
-- VM dashboard for AWS EC2 and GCP Compute Engine, with start and stop actions
+- VM dashboard for AWS EC2, GCP Compute Engine, and DigitalOcean Droplets, with start and stop actions
 - Dark mode with a light/dark toggle (defaults to your system preference)
 - Encrypted cloud credential storage
 - Single admin user authentication
@@ -43,13 +43,14 @@ A simple web dashboard for viewing and managing cloud compute resources across A
 
 1. Log in to the dashboard.
 2. Navigate to **Credentials**.
-3. Add your AWS IAM user access keys and region, or upload a GCP service account JSON.
+3. Add your AWS IAM user access keys and region, upload a GCP service account JSON, or enter a DigitalOcean API token.
 4. Go to **VMs** to view your instances and start or stop them.
 
 To use the start/stop actions, the cloud credentials need the
 `ec2:StartInstances` and `ec2:StopInstances` permissions (AWS) or
 `compute.instances.start` and `compute.instances.stop` permissions (GCP)
-in addition to read access.
+in addition to read access. DigitalOcean tokens need read access to droplets and
+the ability to power droplets on and off.
 
 ## Kubernetes Deployment
 

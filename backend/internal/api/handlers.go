@@ -9,6 +9,7 @@ import (
 
 	"github.com/chriswood123/cross-cloudr/backend/internal/auth"
 	"github.com/chriswood123/cross-cloudr/backend/internal/aws"
+	"github.com/chriswood123/cross-cloudr/backend/internal/digitalocean"
 	"github.com/chriswood123/cross-cloudr/backend/internal/gcp"
 	"github.com/chriswood123/cross-cloudr/backend/internal/models"
 	"github.com/gin-gonic/gin"
@@ -30,12 +31,16 @@ type Handler struct {
 	// Injectable cloud-provider operations so tests can stub out real API calls.
 	listAWSVMs   func(ctx context.Context, creds models.AWSCredentials) ([]models.VM, error)
 	listGCPVMs   func(ctx context.Context, creds models.GCPCredentials) ([]models.VM, error)
+	listDOVMs    func(ctx context.Context, creds models.DigitalOceanCredentials) ([]models.VM, error)
 	testAWSCreds func(ctx context.Context, creds models.AWSCredentials) error
 	testGCPCreds func(ctx context.Context, creds models.GCPCredentials) error
+	testDOCreds  func(ctx context.Context, creds models.DigitalOceanCredentials) error
 	startAWSVM   func(ctx context.Context, creds models.AWSCredentials, instanceID string) error
 	stopAWSVM    func(ctx context.Context, creds models.AWSCredentials, instanceID string) error
 	startGCPVM   func(ctx context.Context, creds models.GCPCredentials, zone, name string) error
 	stopGCPVM    func(ctx context.Context, creds models.GCPCredentials, zone, name string) error
+	startDOVM    func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error
+	stopDOVM     func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error
 }
 
 func NewHandler(repo Repository, authService *auth.Service) *Handler {
@@ -53,8 +58,12 @@ func NewHandler(repo Repository, authService *auth.Service) *Handler {
 			client := gcp.NewClient(creds)
 			return client.ListVMs(ctx)
 		},
+		listDOVMs: func(ctx context.Context, creds models.DigitalOceanCredentials) ([]models.VM, error) {
+			return digitalocean.NewClient(creds).ListVMs(ctx)
+		},
 		testAWSCreds: aws.TestCredentials,
 		testGCPCreds: gcp.TestCredentials,
+		testDOCreds:  digitalocean.TestCredentials,
 		startAWSVM: func(ctx context.Context, creds models.AWSCredentials, instanceID string) error {
 			client, err := aws.NewClient(ctx, creds)
 			if err != nil {
@@ -74,6 +83,12 @@ func NewHandler(repo Repository, authService *auth.Service) *Handler {
 		},
 		stopGCPVM: func(ctx context.Context, creds models.GCPCredentials, zone, name string) error {
 			return gcp.NewClient(creds).StopVM(ctx, zone, name)
+		},
+		startDOVM: func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error {
+			return digitalocean.NewClient(creds).StartVM(ctx, id)
+		},
+		stopDOVM: func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error {
+			return digitalocean.NewClient(creds).StopVM(ctx, id)
 		},
 	}
 }
@@ -129,9 +144,13 @@ type saveGCPCredentialsRequest struct {
 	ServiceAccountJSON string `json:"service_account_json"`
 }
 
+type saveDOCredentialsRequest struct {
+	AccessToken string `json:"access_token"`
+}
+
 func validateProvider(c *gin.Context) (models.Provider, bool) {
 	provider := models.Provider(c.Param("provider"))
-	if provider != models.ProviderAWS && provider != models.ProviderGCP {
+	if provider != models.ProviderAWS && provider != models.ProviderGCP && provider != models.ProviderDO {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid provider"})
 		return "", false
 	}
@@ -181,7 +200,7 @@ func (h *Handler) SaveCredentials(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-	} else {
+	} else if provider == models.ProviderGCP {
 		var req saveGCPCredentialsRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -212,6 +231,26 @@ func (h *Handler) SaveCredentials(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+	} else {
+		var req saveDOCredentialsRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		existing := models.DigitalOceanCredentials{}
+		hasExisting := h.repo.GetCredentials(ctx, provider, &existing) == nil
+		creds := models.DigitalOceanCredentials{AccessToken: req.AccessToken}
+		if creds.AccessToken == "" && hasExisting {
+			creds.AccessToken = existing.AccessToken
+		}
+		if creds.AccessToken == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "access_token is required"})
+			return
+		}
+		if err := h.repo.SaveCredentials(ctx, provider, creds); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "credentials saved"})
@@ -232,12 +271,36 @@ func (h *Handler) DeleteCredentials(c *gin.Context) {
 }
 
 func (h *Handler) ListCredentials(c *gin.Context) {
-	creds, err := h.repo.ListCredentials(context.Background())
+	ctx := context.Background()
+	creds, err := h.repo.ListCredentials(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, creds)
+
+	result := make([]credentialDetail, 0, len(creds))
+	for _, cred := range creds {
+		detail := credentialDetail{
+			Provider:  cred.Provider,
+			UpdatedAt: cred.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+		// Attach non-secret details so the UI can describe each credential.
+		switch cred.Provider {
+		case models.ProviderAWS:
+			var awsCreds models.AWSCredentials
+			if err := h.repo.GetCredentials(ctx, cred.Provider, &awsCreds); err == nil {
+				detail.Region = awsCreds.Region
+			}
+		case models.ProviderGCP:
+			var gcpCreds models.GCPCredentials
+			if err := h.repo.GetCredentials(ctx, cred.Provider, &gcpCreds); err == nil {
+				detail.ProjectID = gcpCreds.ProjectID
+			}
+		}
+		result = append(result, detail)
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 type credentialDetail struct {
@@ -275,7 +338,7 @@ func (h *Handler) GetCredentials(c *gin.Context) {
 			Region:    creds.Region,
 			UpdatedAt: updatedAt,
 		})
-	} else {
+	} else if provider == models.ProviderGCP {
 		var creds models.GCPCredentials
 		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -286,6 +349,13 @@ func (h *Handler) GetCredentials(c *gin.Context) {
 			ProjectID: creds.ProjectID,
 			UpdatedAt: updatedAt,
 		})
+	} else {
+		var creds models.DigitalOceanCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, credentialDetail{Provider: provider, UpdatedAt: updatedAt})
 	}
 }
 
@@ -306,13 +376,23 @@ func (h *Handler) TestCredentials(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-	} else {
+	} else if provider == models.ProviderGCP {
 		var creds models.GCPCredentials
 		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
 		if err := h.testGCPCreds(ctx, creds); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		var creds models.DigitalOceanCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err := h.testDOCreds(ctx, creds); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -364,6 +444,24 @@ func (h *Handler) ListVMs(c *gin.Context) {
 		}()
 	}
 
+	var doCreds models.DigitalOceanCredentials
+	if err := h.repo.GetCredentials(ctx, models.ProviderDO, &doCreds); err == nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			vms, err := h.listDOVMs(ctx, doCreds)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("digitalocean: %w", err))
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			allVMs = append(allVMs, vms...)
+			mu.Unlock()
+		}()
+	}
+
 	wg.Wait()
 
 	if len(allVMs) == 0 && len(errs) > 0 {
@@ -391,8 +489,8 @@ func (h *Handler) ListVMs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"vms": allVMs, "warnings": warnings})
 }
 
-// vmActionRequest identifies a VM to start or stop. AWS addresses instances by
-// instance ID; GCP addresses them by name within a zone.
+// vmActionRequest identifies a VM to start or stop. AWS and DigitalOcean
+// address instances by ID; GCP addresses them by name within a zone.
 type vmActionRequest struct {
 	InstanceID string `json:"instance_id"`
 	Name       string `json:"name"`
@@ -442,7 +540,7 @@ func (h *Handler) vmAction(c *gin.Context, action string) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-	} else {
+	} else if provider == models.ProviderGCP {
 		if req.Name == "" || req.Zone == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name and zone are required"})
 			return
@@ -460,6 +558,26 @@ func (h *Handler) vmAction(c *gin.Context, action string) {
 			err = h.startGCPVM(ctx, creds, zone, req.Name)
 		} else {
 			err = h.stopGCPVM(ctx, creds, zone, req.Name)
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		if req.InstanceID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "instance_id is required"})
+			return
+		}
+		var creds models.DigitalOceanCredentials
+		if err := h.repo.GetCredentials(ctx, provider, &creds); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		var err error
+		if action == "start" {
+			err = h.startDOVM(ctx, creds, req.InstanceID)
+		} else {
+			err = h.stopDOVM(ctx, creds, req.InstanceID)
 		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

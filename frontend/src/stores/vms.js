@@ -45,10 +45,9 @@ export const useVMStore = defineStore('vms', () => {
     actionError.value = null
     pendingActions.value = { ...pendingActions.value, [key]: true }
     try {
-      // AWS addresses instances by instance ID; GCP addresses them by name
-      // within a zone.
+      // AWS and DigitalOcean address instances by ID; GCP uses name and zone.
       const body =
-        vm.provider === 'aws' ? { instance_id: vm.id } : { name: vm.name, zone: vm.zone }
+        vm.provider === 'gcp' ? { name: vm.name, zone: vm.zone } : { instance_id: vm.id }
       await api.post(`/api/vms/${vm.provider}/${action}`, body)
       await fetchVMs()
       return true

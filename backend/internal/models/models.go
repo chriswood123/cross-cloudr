@@ -14,6 +14,7 @@ type Provider string
 const (
 	ProviderAWS Provider = "aws"
 	ProviderGCP Provider = "gcp"
+	ProviderDO  Provider = "digitalocean"
 )
 
 type Credentials struct {
@@ -31,8 +32,12 @@ type AWSCredentials struct {
 }
 
 type GCPCredentials struct {
-	ProjectID        string `json:"project_id"`
+	ProjectID          string `json:"project_id"`
 	ServiceAccountJSON string `json:"service_account_json"`
+}
+
+type DigitalOceanCredentials struct {
+	AccessToken string `json:"access_token"`
 }
 
 type VM struct {

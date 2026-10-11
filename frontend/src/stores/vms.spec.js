@@ -13,6 +13,7 @@ import { useVMStore } from './vms'
 
 const awsVM = { id: 'i-123', provider: 'aws', name: 'web-1', state: 'running' }
 const gcpVM = { id: '456', provider: 'gcp', name: 'gce-1', state: 'RUNNING' }
+const digitalOceanVM = { id: '789', provider: 'digitalocean', name: 'do-1', state: 'running' }
 
 describe('vms store', () => {
   beforeEach(() => {
@@ -146,6 +147,17 @@ describe('vms store', () => {
         zone: 'us-central1-a',
       })
       expect(store.actionError).toBeNull()
+    })
+
+    it('starts a DigitalOcean VM by droplet ID', async () => {
+      api.post.mockResolvedValueOnce({})
+      api.get.mockResolvedValueOnce({ data: { vms: [digitalOceanVM], warnings: '' } })
+
+      const store = useVMStore()
+      await store.startVM(digitalOceanVM)
+
+      expect(api.post).toHaveBeenCalledWith('/api/vms/digitalocean/start', { instance_id: '789' })
+      expect(api.get).toHaveBeenCalledWith('/api/vms')
     })
 
     it('sets actionError when an action fails', async () => {

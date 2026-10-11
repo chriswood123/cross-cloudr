@@ -499,12 +499,27 @@ func TestListCredentials(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var creds []models.Credentials
+	var creds []credentialDetail
 	if err := json.Unmarshal(w.Body.Bytes(), &creds); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
 	if len(creds) != 2 {
-		t.Errorf("expected 2 credential records, got %d", len(creds))
+		t.Fatalf("expected 2 credential records, got %d", len(creds))
+	}
+	byProvider := make(map[models.Provider]credentialDetail, len(creds))
+	for _, cred := range creds {
+		byProvider[cred.Provider] = cred
+	}
+	if byProvider[models.ProviderAWS].Region != "us-east-1" {
+		t.Errorf("expected AWS region us-east-1, got %q", byProvider[models.ProviderAWS].Region)
+	}
+	if byProvider[models.ProviderGCP].ProjectID != "my-project" {
+		t.Errorf("expected GCP project my-project, got %q", byProvider[models.ProviderGCP].ProjectID)
+	}
+
+	// Secrets must never be exposed.
+	if strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "service_account") {
+		t.Errorf("response must not contain secrets: %s", w.Body.String())
 	}
 }
 
@@ -587,6 +602,58 @@ func TestTestCredentials_GCP_Success(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDigitalOceanCredentialsVMsAndActions(t *testing.T) {
+	repo := newMockRepo()
+	h := newTestHandler(repo)
+	h.testDOCreds = func(ctx context.Context, creds models.DigitalOceanCredentials) error {
+		if creds.AccessToken != "do-token" {
+			t.Errorf("expected stored DigitalOcean token, got %q", creds.AccessToken)
+		}
+		return nil
+	}
+	h.listDOVMs = func(ctx context.Context, creds models.DigitalOceanCredentials) ([]models.VM, error) {
+		return []models.VM{{ID: "123", Provider: models.ProviderDO, Name: "web-1", State: "running"}}, nil
+	}
+	var actions []string
+	h.startDOVM = func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error {
+		actions = append(actions, "start:"+id)
+		return nil
+	}
+	h.stopDOVM = func(ctx context.Context, creds models.DigitalOceanCredentials, id string) error {
+		actions = append(actions, "stop:"+id)
+		return nil
+	}
+	r := newTestRouter(h, true)
+	token := loginToken(t, r)
+	headers := authHeaders(token)
+
+	w := doRequest(r, "POST", "/api/credentials/digitalocean", `{"access_token":"do-token"}`, headers)
+	if w.Code != http.StatusOK {
+		t.Fatalf("credential save failed: %d: %s", w.Code, w.Body.String())
+	}
+	w = doRequest(r, "GET", "/api/credentials/digitalocean", "", headers)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "do-token") {
+		t.Fatalf("credential details should not expose the token: %d: %s", w.Code, w.Body.String())
+	}
+	w = doRequest(r, "POST", "/api/credentials/digitalocean/test", "", headers)
+	if w.Code != http.StatusOK {
+		t.Fatalf("credential validation failed: %d: %s", w.Code, w.Body.String())
+	}
+	w = doRequest(r, "GET", "/api/vms", "", headers)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"provider":"digitalocean"`) {
+		t.Fatalf("expected DigitalOcean VM in list: %d: %s", w.Code, w.Body.String())
+	}
+	for _, action := range []string{"start", "stop"} {
+		w = doRequest(r, "POST", "/api/vms/digitalocean/"+action, `{"instance_id":"123"}`, headers)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s action failed: %d: %s", action, w.Code, w.Body.String())
+		}
+	}
+	if fmt.Sprint(actions) != "[start:123 stop:123]" {
+		t.Errorf("unexpected DigitalOcean actions: %v", actions)
 	}
 }
 
