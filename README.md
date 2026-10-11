@@ -73,20 +73,22 @@ helm install cross-cloudr ./helm/cross-cloudr \
 
 ## Running Tests
 
+Common tasks are wrapped in a Makefile; run `make help` to list the targets.
+
 Backend (requires Go 1.26+):
 
 ```bash
-cd backend
-go test ./...
+make test-backend
 ```
 
-Frontend (requires Node 20+):
+Frontend (requires Node 20+, or Docker for the containerized variant):
 
 ```bash
-cd frontend
-npm install
-npm test
+make test-frontend
+make test-frontend-docker
 ```
+
+Run everything with `make test`.
 
 ## Security Notes
 
